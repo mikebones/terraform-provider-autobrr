@@ -188,7 +188,9 @@ type action struct {
 	ClientID                 int32  `json:"client_id,omitempty"`
 	ExternalDownloadClientID int32  `json:"external_download_client_id,omitempty"`
 	Category                 string `json:"category,omitempty"`
+	Label                    string `json:"label,omitempty"`
 	DownloadPath             string `json:"download_path,omitempty"`
+	Paused                   bool   `json:"paused,omitempty"`
 }
 
 // listActions fetches every action across every filter - autobrr has no

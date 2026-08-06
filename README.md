@@ -78,7 +78,18 @@ see autobrr's `DownloadClientType`), `enabled`, `host`, `port`, `tls`,
 `SONARR`/`RADARR` actions - overrides which download client the target
 `*arr` app itself uses for this specific push, letting you scope pushed
 releases to a *different* client than that app's default/RSS-driven one),
-`category`, `download_path`.
+`category`, `label`, `download_path`, `paused`.
+
+**`category` vs `label`**: these are two different, real autobrr fields.
+`category` is qBittorrent-style category assignment. `label` is what
+actually sets a Transmission torrent's label(s) - confirmed against
+autobrr's own `internal/action/transmission.go`: only `action.Label`
+gets sent to `TorrentSet`'s `Labels` field; `Category` is never read by
+the Transmission action type at all. `label` is autobrr's own generic
+assignment mechanism, independent of any `*arr` app's category field
+(e.g. Sonarr's `tvCategory`) - it works identically for filters with no
+`*arr` in the loop (e.g. a plain music filter driving a `TRANSMISSION`
+action directly).
 
 Note: `filter_id` is also never trusted from `GET /api/actions` - it's
 omitted from every entry in that response entirely (confirmed live, not

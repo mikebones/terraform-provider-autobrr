@@ -35,7 +35,9 @@ type actionResourceModel struct {
 	ClientID                 types.Int64  `tfsdk:"client_id"`
 	ExternalDownloadClientID types.Int64  `tfsdk:"external_download_client_id"`
 	Category                 types.String `tfsdk:"category"`
+	Label                    types.String `tfsdk:"label"`
 	DownloadPath             types.String `tfsdk:"download_path"`
+	Paused                   types.Bool   `tfsdk:"paused"`
 }
 
 func (r *ActionResource) Metadata(_ context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
@@ -97,7 +99,15 @@ func (r *ActionResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 				},
 			},
 			"category": schema.StringAttribute{
-				Optional: true,
+				Optional:    true,
+				Description: "qBittorrent-style category assignment. NOT what sets a Transmission label - see \"label\" below (confirmed against autobrr's own internal/action/transmission.go: only action.Label is sent to TorrentSet's Labels field; Category is unused by the Transmission action type).",
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.RequiresReplace(),
+				},
+			},
+			"label": schema.StringAttribute{
+				Optional:    true,
+				Description: "For TRANSMISSION-type actions: sets the torrent's label(s) at add time (comma-separated in autobrr's own model, though this provider treats it as one string). This is autobrr's own generic assignment mechanism - independent of any *arr app's category field (e.g. Sonarr's tvCategory) - so it works the same way for filters with no *arr in the loop at all (e.g. music).",
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.RequiresReplace(),
 				},
@@ -107,6 +117,13 @@ func (r *ActionResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 				Description: "For direct-download actions (e.g. DELUGE_V2): destination path on that client.",
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.RequiresReplace(),
+				},
+			},
+			"paused": schema.BoolAttribute{
+				Optional:    true,
+				Description: "Add the torrent in a paused state.",
+				PlanModifiers: []planmodifier.Bool{
+					boolplanmodifier.RequiresReplace(),
 				},
 			},
 		},
@@ -135,7 +152,9 @@ func (r *ActionResource) modelToAction(m actionResourceModel) *action {
 		ClientID:                 int32(m.ClientID.ValueInt64()),
 		ExternalDownloadClientID: int32(m.ExternalDownloadClientID.ValueInt64()),
 		Category:                 m.Category.ValueString(),
+		Label:                    m.Label.ValueString(),
 		DownloadPath:             m.DownloadPath.ValueString(),
+		Paused:                   m.Paused.ValueBool(),
 	}
 }
 
@@ -153,6 +172,9 @@ func (r *ActionResource) actionToModel(a *action, prior actionResourceModel) act
 		Enabled:  types.BoolValue(a.Enabled),
 		FilterID: prior.FilterID,
 	}
+	if a.Paused {
+		m.Paused = types.BoolValue(true)
+	}
 	if a.ClientID != 0 {
 		m.ClientID = types.Int64Value(int64(a.ClientID))
 	}
@@ -161,6 +183,9 @@ func (r *ActionResource) actionToModel(a *action, prior actionResourceModel) act
 	}
 	if a.Category != "" {
 		m.Category = types.StringValue(a.Category)
+	}
+	if a.Label != "" {
+		m.Label = types.StringValue(a.Label)
 	}
 	if a.DownloadPath != "" {
 		m.DownloadPath = types.StringValue(a.DownloadPath)
