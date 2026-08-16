@@ -1,9 +1,9 @@
 # terraform-provider-autobrr
 
 A minimal Terraform provider for [autobrr](https://autobrr.com/), covering
-IRC networks, download clients (including native `*arr` push targets like
-`SONARR`/`RADARR`, not just torrent clients), actions, and a deliberately
-narrow filter schema.
+IRC networks, indexers, feeds, download clients (including native `*arr`
+push targets like `SONARR`/`RADARR`, not just torrent clients), actions,
+and a deliberately narrow filter schema.
 
 **Local-only** - not published to any Terraform registry. Installed via a
 filesystem mirror (see below), not `terraform init`'s normal registry
@@ -55,6 +55,32 @@ this - documented here so they don't get "fixed" back into bugs later:
   `NOT NULL constraint failed`. `autobrr_filter` always sends empty
   arrays for all three, even though none of them are exposed in this
   provider's schema.
+- **A feed's link to its indexer is a flat `indexer_id` field, not the
+  nested `indexer` object `GET` responses show** (confirmed live
+  2026-08-16: `POST /api/feeds` returned `201` with a populated-looking
+  body, but the feed silently never persisted a real indexer link and
+  vanished on the next read). autobrr's `FeedRepo.Store` only ever reads
+  `indexer_id`; the nested `indexer` object is a read-only join the
+  server fills in for display. `autobrr_feed`'s schema has no nested
+  indexer block at all, on purpose - `indexer_id` is the only thing that
+  can ever link a feed to its indexer.
+- **A feed's `POST /api/feeds` create path silently drops `cookie` and
+  `max_age`** - `FeedRepo.Store`'s `INSERT` column list omits both
+  (confirmed by reading it), while `Update`'s column list includes them.
+  Same shape as the filter indexer-association gap above:
+  `autobrr_feed`'s `Create()` does the `POST` then immediately follows up
+  with a full `PUT` before re-fetching.
+- **An indexer's `identifier` is server-generated on `CREATE` only**,
+  from `slug(implementation-name)` (confirmed in autobrr's own
+  `internal/indexer/service.go` `Store()`) - `Update()` does not
+  regenerate it, it just persists whatever identifier the request body
+  already carries. `autobrr_indexer` never sends a client-supplied
+  identifier on create and always sends the state value back on update.
+  A tracker with no built-in autobrr definition (e.g. a private
+  RSS-only tracker) uses `implementation = "rss"` with no `base_url` -
+  this is the same shape the UI calls "Generic RSS" when you add one by
+  hand; autobrr has no dedicated resource for it, it's a normal indexer
+  row like any other.
 
 ## Resources
 
@@ -64,6 +90,29 @@ this - documented here so they don't get "fixed" back into bugs later:
 `auth_account`, `auth_password` (sensitive, never read back),
 `invite_command`, `channels` (list of channel names - all managed
 channels are enabled).
+
+### `autobrr_indexer`
+
+`id`, `name`, `identifier` (computed, server-generated, never set this),
+`identifier_external` (defaults to `name`), `enabled`, `implementation`
+(`irc`/`rss`/`torznab`/`newznab`, `RequiresReplace`), `base_url` (only
+meaningful for `irc`), `settings` (sensitive map - e.g. an IRC-type
+private tracker's `authkey`/`torrent_pass`/`api_key`; empty for a plain
+`rss` indexer, whose real credentials live on the paired
+`autobrr_feed.url` instead).
+
+An indexer and its feed are always separate API objects in autobrr - see
+`autobrr_feed` below and the quirks section above for how they link.
+
+### `autobrr_feed`
+
+`id`, `name`, `indexer_id` (required - the only link to its
+`autobrr_indexer`, see the quirks section above), `type`
+(`RSS`/`TORZNAB`/`NEWZNAB`), `enabled`, `url` (sensitive - for RSS
+trackers this usually carries the entire auth story as query params),
+`interval`, `timeout`, `max_age`, `api_key` (sensitive), `cookie`
+(sensitive), `download_type` (`MAGNET`/`TORRENT`, flattened out of
+autobrr's nested `settings` object).
 
 ### `autobrr_download_client`
 

@@ -285,3 +285,220 @@ func (c *client) setFilterEnabled(id int, enabled bool) error {
 func (c *client) deleteFilter(id int) error {
 	return c.do(http.MethodDelete, "/api/filters/"+strconv.Itoa(id), nil, nil)
 }
+
+// --- Indexers ---
+// GET /api/indexer has no per-id route (only the flat "/" list, same shape
+// as actions) - getIndexer lists and filters.
+//
+// The GET list response is NOT the same shape as what POST/PUT
+// send/expect. GET returns domain.IndexerDefinition - settings there is
+// an ARRAY of {name, value, ...} objects, the template's schema merged
+// with the instance's stored values for display (confirmed live:
+// decoding it into the flat map[string]string that POST/PUT actually use
+// fails outright with "cannot unmarshal array into Go struct field
+// indexer.settings of type map[string]string"). POST/PUT read/write the
+// bare domain.Indexer instead, where settings really is a flat map. This
+// client has two wire types as a result: indexerListEntry (GET, for
+// reading) converts down to the same indexer shape (write) that
+// createIndexer/updateIndexer use - callers only ever see the flat type.
+//
+// identifier is server-generated on CREATE ONLY, from
+// slug("implementation-name") (confirmed in autobrr's own
+// internal/indexer/service.go Store()) - Update() does NOT regenerate it,
+// it just persists whatever identifier the request body carries. So a
+// create must leave identifier unset/empty and read back whatever the
+// server assigns; an update must always send back the identifier already
+// in state, never blank (an empty identifier on update would persist as
+// empty, breaking the indexer).
+
+type indexer struct {
+	ID                 int64             `json:"id"`
+	Name               string            `json:"name"`
+	Identifier         string            `json:"identifier"`
+	IdentifierExternal string            `json:"identifier_external"`
+	Enabled            bool              `json:"enabled"`
+	Implementation     string            `json:"implementation"`
+	BaseURL            string            `json:"base_url,omitempty"`
+	Settings           map[string]string `json:"settings,omitempty"`
+}
+
+type indexerListSetting struct {
+	Name  string `json:"name"`
+	Value string `json:"value"`
+}
+
+type indexerListEntry struct {
+	ID                 int64                `json:"id"`
+	Name               string               `json:"name"`
+	Identifier         string               `json:"identifier"`
+	IdentifierExternal string               `json:"identifier_external"`
+	Enabled            bool                 `json:"enabled"`
+	Implementation     string               `json:"implementation"`
+	BaseURL            string               `json:"base_url,omitempty"`
+	Settings           []indexerListSetting `json:"settings,omitempty"`
+}
+
+func (e indexerListEntry) toIndexer() indexer {
+	var settings map[string]string
+	if len(e.Settings) > 0 {
+		settings = make(map[string]string, len(e.Settings))
+		for _, s := range e.Settings {
+			settings[s.Name] = s.Value
+		}
+	}
+	return indexer{
+		ID:                 e.ID,
+		Name:               e.Name,
+		Identifier:         e.Identifier,
+		IdentifierExternal: e.IdentifierExternal,
+		Enabled:            e.Enabled,
+		Implementation:     e.Implementation,
+		BaseURL:            e.BaseURL,
+		Settings:           settings,
+	}
+}
+
+func (c *client) listIndexers() ([]indexer, error) {
+	var entries []indexerListEntry
+	if err := c.do(http.MethodGet, "/api/indexer", nil, &entries); err != nil {
+		return nil, err
+	}
+	indexers := make([]indexer, len(entries))
+	for i, e := range entries {
+		indexers[i] = e.toIndexer()
+	}
+	return indexers, nil
+}
+
+func (c *client) getIndexer(id int64) (*indexer, error) {
+	indexers, err := c.listIndexers()
+	if err != nil {
+		return nil, err
+	}
+	for i := range indexers {
+		if indexers[i].ID == id {
+			return &indexers[i], nil
+		}
+	}
+	return nil, nil // not found - caller treats as deleted
+}
+
+func (c *client) createIndexer(i *indexer) (*indexer, error) {
+	var out indexer
+	if err := c.do(http.MethodPost, "/api/indexer", i, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+func (c *client) updateIndexer(i *indexer) error {
+	return c.do(http.MethodPut, "/api/indexer/"+strconv.FormatInt(i.ID, 10), i, nil)
+}
+
+func (c *client) deleteIndexer(id int64) error {
+	return c.do(http.MethodDelete, "/api/indexer/"+strconv.FormatInt(id, 10), nil, nil)
+}
+
+// --- Feeds ---
+// GET /api/feeds is also list-only (no per-id route) - getFeed lists and
+// filters, same shape as actions/indexers.
+//
+// CRITICAL (confirmed live 2026-08-16, see project memory
+// autobrr-rss-feed-api-gotchas): POST /api/feeds returns 201 with a
+// populated response body even when the feed silently fails to persist -
+// autobrr's FeedRepo.Store only ever reads the FLAT IndexerID field
+// (domain.Feed.IndexerID, json "indexer_id"). The nested Indexer field
+// (json "indexer") is display-only, populated by the server on READ from
+// a join - it is never consulted on write. Always set IndexerID; never
+// rely on Indexer being read on write, and never round-trip Indexer back
+// into a write body.
+//
+// url/api_key/cookie are NOT redacted on GET (unlike IRC auth_password
+// and download-client api_key) - safe to read back directly, no
+// preserve-prior-state workaround needed here.
+//
+// Mirror-image gotcha on READ: GET responses never populate the flat
+// IndexerID field at all (confirmed live: absent from the JSON, not just
+// zero) - only the nested Indexer join has it there. resource_feed.go's
+// feedToModel recovers the real value from Indexer.ID when IndexerID
+// comes back empty. So: write with IndexerID (Indexer is ignored),
+// read via Indexer.ID (IndexerID is absent) - the two fields are each
+// only reliable in one direction, never both.
+
+type feedIndexerRef struct {
+	ID                 int    `json:"id"`
+	Name               string `json:"name"`
+	Identifier         string `json:"identifier"`
+	IdentifierExternal string `json:"identifier_external"`
+}
+
+type feedSettings struct {
+	DownloadType string `json:"download_type,omitempty"`
+}
+
+type feed struct {
+	ID        int             `json:"id"`
+	Name      string          `json:"name"`
+	Indexer   *feedIndexerRef `json:"indexer,omitempty"` // read-only, see comment above
+	IndexerID int             `json:"indexer_id,omitempty"`
+	Type      string          `json:"type"`
+	Enabled   bool            `json:"enabled"`
+	URL       string          `json:"url"`
+	Interval  int             `json:"interval"`
+	Timeout   int             `json:"timeout"`
+	MaxAge    int             `json:"max_age"`
+	ApiKey    string          `json:"api_key,omitempty"`
+	Cookie    string          `json:"cookie,omitempty"`
+	Settings  *feedSettings   `json:"settings,omitempty"`
+}
+
+func (c *client) listFeeds() ([]feed, error) {
+	var feeds []feed
+	if err := c.do(http.MethodGet, "/api/feeds", nil, &feeds); err != nil {
+		return nil, err
+	}
+	return feeds, nil
+}
+
+func (c *client) getFeed(id int) (*feed, error) {
+	feeds, err := c.listFeeds()
+	if err != nil {
+		return nil, err
+	}
+	for i := range feeds {
+		if feeds[i].ID == id {
+			return &feeds[i], nil
+		}
+	}
+	return nil, nil // not found - caller treats as deleted
+}
+
+// createFeed: POST /api/feeds' handler echoes back its own decoded request
+// pointer as the response body (internal/http/feed.go's store()), but
+// FeedRepo.Store (internal/database/feed.go) mutates that SAME pointer's
+// ID field via `RETURNING id` before the handler writes the response - so
+// the id DOES come back correctly despite the request/response being the
+// literal same object, no re-list-and-match needed for that part.
+//
+// What does NOT come back correctly: FeedRepo.Store's INSERT column list
+// omits "cookie" and "max_age" entirely (confirmed by reading it) - only
+// Update's column list includes them. A fresh create silently drops
+// those two fields regardless of what's sent, exactly like
+// resource_filter.go's indexer-association gap. resource_feed.go's
+// Create() works around this the same way: create, then immediately
+// update with the full desired state, then re-fetch.
+func (c *client) createFeed(f *feed) (*feed, error) {
+	var out feed
+	if err := c.do(http.MethodPost, "/api/feeds", f, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+func (c *client) updateFeed(f *feed) error {
+	return c.do(http.MethodPut, "/api/feeds/"+strconv.Itoa(f.ID), f, nil)
+}
+
+func (c *client) deleteFeed(id int) error {
+	return c.do(http.MethodDelete, "/api/feeds/"+strconv.Itoa(id), nil, nil)
+}

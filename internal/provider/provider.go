@@ -34,7 +34,7 @@ func (p *AutobrrProvider) Metadata(_ context.Context, _ provider.MetadataRequest
 
 func (p *AutobrrProvider) Schema(_ context.Context, _ provider.SchemaRequest, resp *provider.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		Description: "Manages autobrr's IRC networks, download clients, actions, and filters (a narrow, structural subset - see this provider's README) against its REST API.",
+		Description: "Manages autobrr's IRC networks, indexers, feeds, download clients, actions, and filters (a narrow, structural subset - see this provider's README) against its REST API.",
 		Attributes: map[string]schema.Attribute{
 			"endpoint": schema.StringAttribute{
 				Required:    true,
@@ -63,6 +63,8 @@ func (p *AutobrrProvider) Configure(ctx context.Context, req provider.ConfigureR
 func (p *AutobrrProvider) Resources(_ context.Context) []func() resource.Resource {
 	return []func() resource.Resource{
 		NewIRCNetworkResource,
+		NewIndexerResource,
+		NewFeedResource,
 		NewDownloadClientResource,
 		NewActionResource,
 		NewFilterResource,
