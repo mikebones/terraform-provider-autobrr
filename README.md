@@ -74,8 +74,19 @@ this - documented here so they don't get "fixed" back into bugs later:
   from `slug(implementation-name)` (confirmed in autobrr's own
   `internal/indexer/service.go` `Store()`) - `Update()` does not
   regenerate it, it just persists whatever identifier the request body
-  already carries. `autobrr_indexer` never sends a client-supplied
-  identifier on create and always sends the state value back on update.
+  already carries. Only `rss`/`torznab`/`newznab` implementations get
+  this auto-generation (`isImplFeed` in autobrr's own code) -
+  `autobrr_indexer` clears any configured `identifier` before create for
+  those three only. **`irc` is NOT auto-generated at all** - a real
+  built-in tracker definition (BTN, PTP, Redacted, Orpheus/OPS, etc.)
+  is looked up by `identifier` exactly as configured (`mapIndexer()`
+  calls `getDefinitionByName(indexer.Identifier)` directly for
+  non-feed implementations), so `identifier` is REQUIRED for `irc` and
+  must match the tracker's real identifier from
+  `internal/indexer/definitions/*.yaml` in autobrr's own source (e.g.
+  `"ops"`, not a made-up value) - get it wrong and the indexer row gets
+  created with no parse rules/settings schema attached, silently, no
+  error.
   A tracker with no built-in autobrr definition (e.g. a private
   RSS-only tracker) uses `implementation = "rss"` with no `base_url` -
   this is the same shape the UI calls "Generic RSS" when you add one by

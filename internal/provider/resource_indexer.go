@@ -59,8 +59,11 @@ func (r *IndexerResource) Schema(_ context.Context, _ resource.SchemaRequest, re
 				Description: "Display name, e.g. \"DeepBassNine All\".",
 			},
 			"identifier": schema.StringAttribute{
-				Computed:    true,
-				Description: "Server-generated on CREATE from slug(implementation-name) - never set this, autobrr assigns it (confirmed in autobrr's own internal/indexer/service.go Store()). Renaming an existing indexer later does NOT regenerate it (Update() persists whatever identifier is already there) - this is real autobrr behavior, not a provider limitation.",
+				Optional: true,
+				Computed: true,
+				Description: "For rss/torznab/newznab: leave unset, autobrr generates it from slug(implementation-name) on create and this provider never sends a client value for those (confirmed in autobrr's own internal/indexer/service.go Store() - only feed-type implementations get regenerated there). " +
+					"For irc: REQUIRED - must be the exact identifier of a real built-in autobrr indexer definition (e.g. \"ops\" for Orpheus, \"btn\" for BroadcasTheNet - see autobrr's internal/indexer/definitions/*.yaml). autobrr's Store() does NOT auto-generate identifiers for irc-type indexers - mapIndexer() looks up the built-in definition template by this exact string, so an empty or wrong value silently produces an indexer with no parse rules/settings schema attached, not an error. " +
+					"Never changes after create either way (Update() persists whatever is already there verbatim, it does not regenerate).",
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.UseStateForUnknown(),
 				},
@@ -156,8 +159,17 @@ func (r *IndexerResource) Create(ctx context.Context, req resource.CreateRequest
 		resp.Diagnostics.AddError("Error building indexer", err.Error())
 		return
 	}
-	// identifier is server-assigned on create - never send a client value.
-	i.Identifier = ""
+	// Only feed-type implementations get a server-generated identifier
+	// (isImplFeed in autobrr's own service.go) - clearing it there avoids
+	// ever fighting the server's own slug(implementation-name) logic.
+	// irc-type indexers have NO such auto-generation and MUST carry the
+	// exact built-in definition identifier the config supplied (e.g.
+	// "ops") - clearing it here would silently create an indexer with no
+	// definition attached instead of erroring, so it must be left alone.
+	switch i.Implementation {
+	case "rss", "torznab", "newznab":
+		i.Identifier = ""
+	}
 
 	created, err := r.client.createIndexer(i)
 	if err != nil {
