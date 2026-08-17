@@ -130,11 +130,20 @@ func (r *IndexerResource) modelToIndexer(ctx context.Context, m indexerResourceM
 	}, nil
 }
 
-func (r *IndexerResource) indexerToModel(ctx context.Context, i *indexer) (indexerResourceModel, error) {
-	settingsMap, diags := types.MapValueFrom(ctx, types.StringType, i.Settings)
-	if diags.HasError() {
-		return indexerResourceModel{}, fmt.Errorf("converting settings: %v", diags)
-	}
+// indexerToModel: settings is NEVER trusted from the API - GET redacts
+// secret-type setting values to the literal string "<redacted>" (same
+// pattern as IRC auth_password/download-client api_key - confirmed live
+// on OPS's real torrent_pass/api_key), and even POST/PUT's response
+// isn't safe to trust byte-for-byte either (a real "provider produced
+// inconsistent result" apply error on OPS's create traced back to this).
+// prior (state before Read, or plan before Create/Update) is preserved
+// unconditionally instead, same rationale as ircNetworkResource's
+// AuthPassword. One-time consequence: right after `terraform import`,
+// settings starts empty in state (nothing to preserve yet) - the first
+// apply after an import will show a diff setting it to whatever the
+// config says, same documented caveat as the other sensitive fields in
+// this provider (see README).
+func (r *IndexerResource) indexerToModel(ctx context.Context, i *indexer, prior indexerResourceModel) (indexerResourceModel, error) {
 	return indexerResourceModel{
 		ID:                 types.Int64Value(i.ID),
 		Name:               types.StringValue(i.Name),
@@ -143,7 +152,7 @@ func (r *IndexerResource) indexerToModel(ctx context.Context, i *indexer) (index
 		Enabled:            types.BoolValue(i.Enabled),
 		Implementation:     types.StringValue(i.Implementation),
 		BaseURL:            types.StringValue(i.BaseURL),
-		Settings:           settingsMap,
+		Settings:           prior.Settings,
 	}, nil
 }
 
@@ -177,7 +186,7 @@ func (r *IndexerResource) Create(ctx context.Context, req resource.CreateRequest
 		return
 	}
 
-	model, err := r.indexerToModel(ctx, created)
+	model, err := r.indexerToModel(ctx, created, plan)
 	if err != nil {
 		resp.Diagnostics.AddError("Error decoding indexer", err.Error())
 		return
@@ -202,7 +211,7 @@ func (r *IndexerResource) Read(ctx context.Context, req resource.ReadRequest, re
 		return
 	}
 
-	model, err := r.indexerToModel(ctx, i)
+	model, err := r.indexerToModel(ctx, i, state)
 	if err != nil {
 		resp.Diagnostics.AddError("Error decoding indexer", err.Error())
 		return
@@ -240,7 +249,7 @@ func (r *IndexerResource) Update(ctx context.Context, req resource.UpdateRequest
 		return
 	}
 
-	model, err := r.indexerToModel(ctx, updated)
+	model, err := r.indexerToModel(ctx, updated, plan)
 	if err != nil {
 		resp.Diagnostics.AddError("Error decoding indexer", err.Error())
 		return

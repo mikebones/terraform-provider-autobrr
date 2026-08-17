@@ -92,6 +92,27 @@ this - documented here so they don't get "fixed" back into bugs later:
   this is the same shape the UI calls "Generic RSS" when you add one by
   hand; autobrr has no dedicated resource for it, it's a normal indexer
   row like any other.
+- **`POST /api/irc` returns `204 No Content` on success - not the
+  created network** (confirmed live 2026-08-16 adding Orpheus/OPS: a
+  real `"provider produced inconsistent result after apply"` error, with
+  `port`/`tls`/`channels`/`enabled` all reverting to their Go zero
+  values, because there was no response body to decode in the first
+  place). `internal/http/irc.go`'s `storeNetwork()` handler literally
+  calls `h.encoder.NoContent(w)`. There's no id in the (empty) response
+  to re-fetch by either, so `autobrr_irc_network`'s `createIRCNetwork`
+  lists all networks (`GET /api/irc`) and matches by `name` instead -
+  relies on network names being unique, same assumption autobrr's own UI
+  already makes (it has no other way to disambiguate networks either).
+- **An indexer's `settings` can't be trusted from ANY API response, on
+  create or read** - `GET /api/indexer` redacts `type: "secret"` setting
+  values to `"<redacted>"` (confirmed live: OPS's real `torrent_pass`/
+  `api_key` came back that way), and even the `POST`/`PUT` response
+  isn't safe either (a real "provider produced inconsistent result"
+  apply error on `settings` specifically, creating OPS). `autobrr_indexer`
+  now applies the same "always preserve from prior state/plan, never
+  trust the API" rule this provider already uses for IRC
+  `auth_password` and download-client `api_key` - see `indexerToModel`'s
+  doc comment.
 
 ## Resources
 

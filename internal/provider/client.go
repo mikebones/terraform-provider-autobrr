@@ -111,12 +111,41 @@ func (c *client) getIRCNetwork(id int64) (*ircNetwork, error) {
 	return &n, nil
 }
 
-func (c *client) createIRCNetwork(n *ircNetwork) (*ircNetwork, error) {
-	var out ircNetwork
-	if err := c.do(http.MethodPost, "/api/irc", n, &out); err != nil {
+func (c *client) listIRCNetworks() ([]ircNetwork, error) {
+	var networks []ircNetwork
+	if err := c.do(http.MethodGet, "/api/irc", nil, &networks); err != nil {
 		return nil, err
 	}
-	return &out, nil
+	return networks, nil
+}
+
+// createIRCNetwork: POST /api/irc's handler (internal/http/irc.go
+// storeNetwork()) returns 204 No Content on success - NOT the created
+// network (confirmed by reading it: `h.encoder.NoContent(w)`, no body at
+// all). Decoding an empty body into *ircNetwork silently leaves every
+// field at its Go zero value (port 0, tls false, channels nil, enabled
+// false...), which is exactly what caused a real "provider produced
+// inconsistent result after apply" error creating the Orpheus (OPS)
+// network live - terraform correctly detected id/port/tls/channels/
+// enabled all reverting to zero and refused to accept it. There is no
+// id in the response to re-fetch by, either, so the only way back to the
+// real created row is GET /api/irc (list) filtered by name - relies on
+// network names being unique, which autobrr's own UI already assumes
+// (it has no other way to disambiguate networks either).
+func (c *client) createIRCNetwork(n *ircNetwork) (*ircNetwork, error) {
+	if err := c.do(http.MethodPost, "/api/irc", n, nil); err != nil {
+		return nil, err
+	}
+	networks, err := c.listIRCNetworks()
+	if err != nil {
+		return nil, fmt.Errorf("created network but failed to look it up by name: %w", err)
+	}
+	for i := range networks {
+		if networks[i].Name == n.Name {
+			return &networks[i], nil
+		}
+	}
+	return nil, fmt.Errorf("created network %q but could not find it in the network list afterward", n.Name)
 }
 
 func (c *client) updateIRCNetwork(n *ircNetwork) error {
