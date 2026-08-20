@@ -113,6 +113,19 @@ this - documented here so they don't get "fixed" back into bugs later:
   trust the API" rule this provider already uses for IRC
   `auth_password` and download-client `api_key` - see `indexerToModel`'s
   doc comment.
+- **`WEBHOOK`-type actions' `webhook_host`/`webhook_data`/etc. are, unlike
+  every secret field above, genuinely NOT redacted on `GET`** (confirmed
+  live 2026-08-20 adding the gomission-snatch action, real URL/apikey came
+  back plain) - `actionToModel` reads them straight from the API response,
+  no preserve-from-prior-state workaround needed, unlike `filter_id`
+  (still omitted from every `GET /api/actions` entry, still needs the
+  existing prior-state fallback). Also worth knowing if you're using this:
+  autobrr's own action-execution code (`internal/action/run.go`'s
+  `webhook()`) never actually applies the `webhook_headers` field to the
+  outgoing request at all - a dead field in autobrr's own source, not
+  something this provider chose to omit. If a webhook target needs auth,
+  it has to come from a token embedded in `webhook_host` (query param) or
+  `webhook_data` (body), not a header.
 
 ## Resources
 
@@ -159,7 +172,14 @@ see autobrr's `DownloadClientType`), `enabled`, `host`, `port`, `tls`,
 `SONARR`/`RADARR` actions - overrides which download client the target
 `*arr` app itself uses for this specific push, letting you scope pushed
 releases to a *different* client than that app's default/RSS-driven one),
-`category`, `label`, `download_path`, `paused`.
+`category`, `label`, `download_path`, `paused`, `webhook_host` (sensitive
+- for `WEBHOOK`-type actions, the destination URL; a shared-secret token
+typically has to be embedded here as a query param, since
+`webhook_headers` is a dead field in autobrr's own code - see the quirks
+section), `webhook_type`, `webhook_method` (autobrr's own `webhook()`
+hardcodes `POST` regardless, confirmed via source - set for API-shape
+completeness), `webhook_data` (the POST body, run through autobrr's own
+Go-template engine against the matched release, e.g. `{{.DownloadURL}}`).
 
 **`category` vs `label`**: these are two different, real autobrr fields.
 `category` is qBittorrent-style category assignment. `label` is what

@@ -38,6 +38,10 @@ type actionResourceModel struct {
 	Label                    types.String `tfsdk:"label"`
 	DownloadPath             types.String `tfsdk:"download_path"`
 	Paused                   types.Bool   `tfsdk:"paused"`
+	WebhookHost              types.String `tfsdk:"webhook_host"`
+	WebhookType              types.String `tfsdk:"webhook_type"`
+	WebhookMethod            types.String `tfsdk:"webhook_method"`
+	WebhookData              types.String `tfsdk:"webhook_data"`
 }
 
 func (r *ActionResource) Metadata(_ context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
@@ -126,6 +130,35 @@ func (r *ActionResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 					boolplanmodifier.RequiresReplace(),
 				},
 			},
+			"webhook_host": schema.StringAttribute{
+				Optional:    true,
+				Sensitive:   true,
+				Description: "For WEBHOOK-type actions: the destination URL, always POSTed to. Sensitive since a caller with no other auth surface (autobrr's own WebhookHeaders is a dead field - see webhook_data) typically has to embed a shared-secret token as a query param here.",
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.RequiresReplace(),
+				},
+			},
+			"webhook_type": schema.StringAttribute{
+				Optional:    true,
+				Description: "For WEBHOOK-type actions: content-type hint (e.g. \"json\"). autobrr's own webhook() always sends Content-Type: application/json regardless (confirmed via source), so this is informational in autobrr's UI rather than functionally load-bearing, but the API still expects it.",
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.RequiresReplace(),
+				},
+			},
+			"webhook_method": schema.StringAttribute{
+				Optional:    true,
+				Description: "For WEBHOOK-type actions: HTTP method. autobrr's own webhook() hardcodes POST regardless of this value (confirmed via source) - set for API-shape completeness, not functional effect.",
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.RequiresReplace(),
+				},
+			},
+			"webhook_data": schema.StringAttribute{
+				Optional:    true,
+				Description: "For WEBHOOK-type actions: the POST body, a plain string autobrr passes through its own Go-template engine against the matched release (e.g. {{.DownloadURL}}) before sending - see autobrr's own release template docs for available fields.",
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.RequiresReplace(),
+				},
+			},
 		},
 	}
 }
@@ -155,6 +188,10 @@ func (r *ActionResource) modelToAction(m actionResourceModel) *action {
 		Label:                    m.Label.ValueString(),
 		DownloadPath:             m.DownloadPath.ValueString(),
 		Paused:                   m.Paused.ValueBool(),
+		WebhookHost:              m.WebhookHost.ValueString(),
+		WebhookType:              m.WebhookType.ValueString(),
+		WebhookMethod:            m.WebhookMethod.ValueString(),
+		WebhookData:              m.WebhookData.ValueString(),
 	}
 }
 
@@ -189,6 +226,24 @@ func (r *ActionResource) actionToModel(a *action, prior actionResourceModel) act
 	}
 	if a.DownloadPath != "" {
 		m.DownloadPath = types.StringValue(a.DownloadPath)
+	}
+	// Unlike indexer/feed secret fields elsewhere in this provider,
+	// confirmed live that GET /api/filters/{id} returns webhook_host
+	// unmasked (a real URL, not a "<redacted>" placeholder) - autobrr has
+	// no equivalent masking for webhook fields, so these can be read back
+	// directly rather than needing the preserve-from-prior-state
+	// workaround FilterID above uses.
+	if a.WebhookHost != "" {
+		m.WebhookHost = types.StringValue(a.WebhookHost)
+	}
+	if a.WebhookType != "" {
+		m.WebhookType = types.StringValue(a.WebhookType)
+	}
+	if a.WebhookMethod != "" {
+		m.WebhookMethod = types.StringValue(a.WebhookMethod)
+	}
+	if a.WebhookData != "" {
+		m.WebhookData = types.StringValue(a.WebhookData)
 	}
 	return m
 }

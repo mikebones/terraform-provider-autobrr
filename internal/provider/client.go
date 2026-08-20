@@ -220,6 +220,15 @@ type action struct {
 	Label                    string `json:"label,omitempty"`
 	DownloadPath             string `json:"download_path,omitempty"`
 	Paused                   bool   `json:"paused,omitempty"`
+	// WEBHOOK-type fields. autobrr's own WebhookHeaders is deliberately
+	// NOT modeled here - confirmed live (2026-08-20, gomission-snatch
+	// action) that autobrr's own action-execution code never applies it
+	// to the outgoing request at all, a dead field in autobrr's own
+	// source, so there's nothing real for this provider to manage.
+	WebhookHost   string `json:"webhook_host,omitempty"`
+	WebhookType   string `json:"webhook_type,omitempty"`
+	WebhookMethod string `json:"webhook_method,omitempty"`
+	WebhookData   string `json:"webhook_data,omitempty"`
 }
 
 // listActions fetches every action across every filter - autobrr has no
